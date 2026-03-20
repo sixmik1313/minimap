@@ -1,0 +1,983 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>NAV // TACTICAL MAP</title>
+
+<!-- Leaflet CSS -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<!-- Leaflet JS -->
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet-src.min.js"></script>
+
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
+
+:root {
+  --g:   #00ff41;
+  --r:   #ff003c;
+  --b:   #00d4ff;
+  --o:   #ffaa00;
+  --y:   #ffee00;
+  --bg:  #010a02;
+  --pan: rgba(1,12,3,0.97);
+  --brd: rgba(0,255,65,0.18);
+}
+
+*,*::before,*::after { margin:0; padding:0; box-sizing:border-box; }
+html, body {
+  width:100%; height:100%; overflow:hidden;
+  background:var(--bg); color:var(--g);
+  font-family:'Share Tech Mono', monospace;
+  -webkit-tap-highlight-color:transparent;
+  user-select:none;
+}
+
+/* Scanlines overlay */
+#scanlines {
+  position:fixed; inset:0; z-index:1000; pointer-events:none;
+  background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,0.08) 3px,rgba(0,0,0,0.08) 4px);
+}
+/* Vignette */
+#vignette {
+  position:fixed; inset:0; z-index:999; pointer-events:none;
+  background:radial-gradient(ellipse at center,transparent 50%,rgba(0,0,0,0.65) 100%);
+}
+
+/* ══ LAYOUT ══ */
+#app { position:fixed; inset:0; display:flex; flex-direction:column; }
+
+/* ── HEADER ── */
+header {
+  height:44px; flex-shrink:0;
+  display:flex; align-items:center; justify-content:space-between;
+  padding:0 14px;
+  background:var(--pan); border-bottom:1px solid var(--brd);
+  z-index:500; position:relative;
+}
+.logo {
+  font-family:'Orbitron',sans-serif; font-weight:900; font-size:.95rem;
+  letter-spacing:.35em;
+  text-shadow:0 0 10px var(--g),0 0 28px var(--g);
+  animation:glow 4s ease-in-out infinite;
+}
+@keyframes glow {
+  0%,100%{text-shadow:0 0 10px var(--g),0 0 28px var(--g);}
+  50%{text-shadow:0 0 18px var(--g),0 0 55px var(--g),0 0 85px var(--g);}
+}
+.hstats { display:flex; gap:14px; font-size:.6rem; align-items:center; }
+.hs { display:flex; flex-direction:column; align-items:center; gap:1px; }
+.hs-l { opacity:.4; font-size:.5rem; letter-spacing:.08em; }
+.hs-v { color:var(--b); font-weight:bold; }
+.hs-v.ok  { color:var(--g); }
+.hs-v.warn{ color:var(--o); }
+.hs-v.bad { color:var(--r); animation:blk .5s step-end infinite; }
+@keyframes blk{0%,100%{opacity:1;}50%{opacity:0;}}
+
+/* ── BODY ── */
+.body { flex:1; display:flex; overflow:hidden; position:relative; }
+
+/* ══ MAP ══ */
+#map-container {
+  flex:1; position:relative; z-index:1;
+  overflow:hidden;
+}
+#map {
+  width:100%; height:100%;
+  background:#010a02;
+}
+
+/* Force dark/military tile filter */
+#map .leaflet-tile-pane {
+  filter: brightness(0.55) contrast(1.2) saturate(0.3) hue-rotate(100deg);
+}
+
+/* Override Leaflet controls look */
+.leaflet-control-zoom {
+  border:1px solid var(--brd) !important;
+  background:var(--pan) !important;
+  border-radius:0 !important;
+}
+.leaflet-control-zoom a {
+  background:transparent !important;
+  color:var(--g) !important;
+  border-bottom:1px solid var(--brd) !important;
+  font-family:'Share Tech Mono',monospace !important;
+  font-size:1rem !important;
+  line-height:26px !important;
+  width:26px !important; height:26px !important;
+}
+.leaflet-control-zoom a:hover { background:rgba(0,255,65,.12) !important; }
+.leaflet-control-attribution { display:none !important; }
+
+/* HUD overlay on map */
+.map-hud { position:absolute; z-index:10; pointer-events:none; }
+.hc { position:absolute; width:22px; height:22px; z-index:10; pointer-events:none; }
+.hc.tl{top:10px;left:10px;border-top:2px solid var(--g);border-left:2px solid var(--g);}
+.hc.tr{top:10px;right:10px;border-top:2px solid var(--g);border-right:2px solid var(--g);}
+.hc.bl{bottom:10px;left:10px;border-bottom:2px solid var(--g);border-left:2px solid var(--g);}
+.hc.br{bottom:10px;right:10px;border-bottom:2px solid var(--g);border-right:2px solid var(--g);}
+
+/* Heading tape */
+.hdg-tape {
+  position:absolute; top:0; left:0; right:0; height:26px; z-index:10;
+  background:rgba(1,10,3,0.88); border-bottom:1px solid var(--brd);
+  overflow:hidden; pointer-events:none;
+}
+.tape-inner {
+  position:absolute; top:0; height:100%;
+  display:flex; align-items:flex-end; padding-bottom:2px;
+  white-space:nowrap;
+}
+.htick { width:18px; flex-shrink:0; display:flex; flex-direction:column; align-items:center; gap:1px; }
+.htick-line { width:1px; }
+.htick-line.maj { height:10px; background:rgba(255,238,0,.9); }
+.htick-line.med { height:7px; background:rgba(0,255,65,.6); }
+.htick-line.min { height:4px; background:rgba(0,255,65,.25); }
+.htick-lbl { font-size:.4rem; color:var(--g); opacity:.65; }
+.htick-lbl.card { color:var(--y); opacity:1; font-size:.45rem; }
+.tape-cursor {
+  position:absolute; top:0; left:50%; transform:translateX(-50%);
+  display:flex; flex-direction:column; align-items:center; pointer-events:none;
+}
+.tape-val {
+  font-family:'Orbitron',sans-serif; font-size:.52rem; font-weight:700;
+  color:var(--y); letter-spacing:.05em;
+  background:rgba(1,10,3,.95); padding:0 4px;
+}
+.tape-tri {
+  width:0; height:0;
+  border-left:5px solid transparent; border-right:5px solid transparent;
+  border-top:6px solid var(--y);
+}
+
+/* GPS info bottom-left */
+.gps-hud {
+  position:absolute; bottom:12px; left:12px; z-index:10;
+  font-size:.52rem; line-height:1.9; pointer-events:none;
+  text-shadow:0 1px 4px #000;
+}
+.gps-hud span { color:var(--b); }
+
+/* Speed bottom-right */
+.spd-hud {
+  position:absolute; bottom:12px; right:12px; z-index:10;
+  text-align:right; pointer-events:none;
+}
+.spd-num {
+  font-family:'Orbitron',sans-serif; font-weight:900; font-size:2rem;
+  color:var(--g); text-shadow:0 0 14px var(--g); line-height:1;
+}
+.spd-unit { font-size:.5rem; opacity:.5; letter-spacing:.12em; }
+
+/* Cache progress bar */
+#cache-bar-wrap {
+  position:absolute; top:26px; left:0; right:0; height:3px;
+  z-index:11; display:none;
+}
+#cache-bar {
+  height:100%; background:var(--o); width:0%;
+  transition:width .3s; box-shadow:0 0 6px var(--o);
+}
+
+/* Accuracy circle — done via Leaflet circle */
+
+/* Offline badge */
+#offline-badge {
+  position:absolute; top:32px; left:50%; transform:translateX(-50%);
+  z-index:11; font-size:.5rem; padding:2px 8px;
+  border:1px solid var(--o); color:var(--o);
+  background:rgba(1,10,3,.9); letter-spacing:.1em;
+  display:none;
+}
+
+/* ══ SIDE PANEL ══ */
+.panel {
+  width:195px; flex-shrink:0;
+  background:var(--pan); border-left:1px solid var(--brd);
+  display:flex; flex-direction:column; overflow-y:auto; z-index:10;
+  transition:width .26s cubic-bezier(.4,0,.2,1), opacity .26s;
+}
+.panel.closed { width:0; opacity:0; pointer-events:none; }
+
+#ptoggle {
+  position:absolute; top:50%; right:0; transform:translateY(-50%);
+  width:18px; height:40px; z-index:200;
+  background:var(--pan); border:1px solid var(--brd); border-right:none;
+  color:var(--g); font-size:.6rem; cursor:pointer;
+  display:flex; align-items:center; justify-content:center;
+  transition:background .15s;
+}
+#ptoggle:hover { background:rgba(0,255,65,.12); }
+
+.psec { border-bottom:1px solid var(--brd); padding:9px 11px; flex-shrink:0; }
+.pt {
+  font-family:'Orbitron',sans-serif; font-size:.46rem;
+  letter-spacing:.2em; opacity:.42; margin-bottom:6px; padding-bottom:3px;
+  border-bottom:1px solid rgba(0,255,65,.08); white-space:nowrap;
+}
+.drow { display:flex; justify-content:space-between; align-items:baseline; margin:3px 0; font-size:.57rem; }
+.dval { color:var(--b); font-weight:bold; }
+.dlbl { opacity:.45; font-size:.52rem; }
+
+/* Download tiles section */
+.dl-info {
+  font-size:.54rem; opacity:.55; line-height:1.8; margin-bottom:8px;
+}
+.dl-btn {
+  width:100%; font-family:'Share Tech Mono',monospace; font-size:.58rem;
+  padding:7px 10px; background:transparent; color:var(--g);
+  border:1px solid var(--brd); cursor:pointer; letter-spacing:.08em;
+  transition:all .15s; margin-bottom:4px; text-align:left;
+}
+.dl-btn:hover { background:rgba(0,255,65,.1); border-color:var(--g); }
+.dl-btn:disabled { opacity:.3; cursor:not-allowed; }
+.dl-btn.active { border-color:var(--o); color:var(--o); }
+
+#dl-progress {
+  font-size:.52rem; color:var(--o); margin-top:4px; min-height:1em;
+  line-height:1.6;
+}
+
+/* Tile cache stats */
+#cache-stats { font-size:.52rem; color:var(--b); margin-top:3px; }
+
+/* Map style toggle */
+.style-btns { display:flex; gap:4px; flex-wrap:wrap; }
+.sbtn2 {
+  font-size:.48rem; padding:3px 7px; background:transparent;
+  border:1px solid var(--brd); color:var(--g); cursor:pointer;
+  font-family:'Share Tech Mono',monospace; transition:all .15s;
+}
+.sbtn2.active,.sbtn2:hover { background:rgba(0,255,65,.1); border-color:var(--g); }
+
+/* Trail toggle */
+.abtn {
+  width:100%; font-family:'Share Tech Mono',monospace; font-size:.56rem;
+  padding:6px 9px; background:transparent; color:var(--g);
+  border:1px solid var(--brd); cursor:pointer; margin-bottom:4px;
+  letter-spacing:.06em; transition:all .15s; text-align:left;
+}
+.abtn:hover { background:rgba(0,255,65,.1); border-color:var(--g); }
+.abtn.danger { color:var(--r); border-color:rgba(255,0,60,.25); }
+.abtn.danger:hover { background:rgba(255,0,60,.1); }
+
+/* Waypoints */
+#wp-list { display:flex; flex-direction:column; gap:3px; max-height:140px; overflow-y:auto; }
+.wp-item {
+  font-size:.54rem; padding:4px 6px;
+  border-left:2px solid var(--b); background:rgba(0,212,255,.05);
+  display:flex; justify-content:space-between; align-items:center;
+}
+.wp-del { opacity:.3; cursor:pointer; padding:0 3px; }
+.wp-del:hover { opacity:1; color:var(--r); }
+.no-wp { font-size:.54rem; opacity:.28; font-style:italic; }
+
+/* ══ START SCREEN ══ */
+#start {
+  position:fixed; inset:0; z-index:2000;
+  background:rgba(1,6,2,.97);
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:20px;
+}
+.slogo {
+  font-family:'Orbitron',sans-serif; font-weight:900;
+  font-size:clamp(1.6rem,5vw,3rem); letter-spacing:.4em; text-align:center;
+  text-shadow:0 0 18px var(--g),0 0 55px var(--g); animation:glow 2s ease-in-out infinite;
+}
+.ssub { font-size:.68rem; opacity:.4; letter-spacing:.2em; text-align:center; }
+.sfeats {
+  font-size:.6rem; opacity:.55; text-align:center; line-height:2;
+  border:1px solid var(--brd); padding:10px 20px; max-width:320px;
+}
+.sfeats em { color:var(--o); font-style:normal; }
+.start-btn {
+  font-family:'Orbitron',sans-serif; font-size:.8rem; letter-spacing:.3em;
+  padding:12px 36px; background:transparent; color:var(--g); border:2px solid var(--g); cursor:pointer;
+  box-shadow:0 0 16px rgba(0,255,65,.2); transition:all .2s;
+}
+.start-btn:hover,.start-btn:active { background:var(--g); color:#000; box-shadow:0 0 45px rgba(0,255,65,.9); }
+.start-note { font-size:.52rem; opacity:.3; text-align:center; max-width:280px; line-height:1.9; }
+</style>
+</head>
+<body>
+
+<div id="scanlines"></div>
+<div id="vignette"></div>
+
+<div id="app">
+  <header>
+    <div class="logo">◈ TACMAP</div>
+    <div class="hstats">
+      <div class="hs"><span class="hs-l">GPS</span><span class="hs-v" id="h-gps">INIT</span></div>
+      <div class="hs"><span class="hs-l">PRÉCISION</span><span class="hs-v" id="h-acc">-- m</span></div>
+      <div class="hs"><span class="hs-l">CAP</span><span class="hs-v" id="h-hdg">---°</span></div>
+      <div class="hs"><span class="hs-l">CACHE</span><span class="hs-v" id="h-cache">0</span></div>
+    </div>
+  </header>
+
+  <div class="body">
+    <!-- MAP AREA -->
+    <div id="map-container">
+      <!-- Leaflet map -->
+      <div id="map"></div>
+
+      <!-- HUD overlays -->
+      <div class="hc tl"></div>
+      <div class="hc tr"></div>
+      <div class="hc bl"></div>
+      <div class="hc br"></div>
+
+      <!-- Heading tape -->
+      <div class="hdg-tape">
+        <div class="tape-inner" id="tape-inner"></div>
+        <div class="tape-cursor">
+          <div class="tape-val" id="tape-val">000°</div>
+          <div class="tape-tri"></div>
+        </div>
+      </div>
+
+      <!-- Cache progress -->
+      <div id="cache-bar-wrap"><div id="cache-bar"></div></div>
+
+      <!-- Offline badge -->
+      <div id="offline-badge">⚡ HORS LIGNE</div>
+
+      <!-- GPS info -->
+      <div class="gps-hud">
+        LAT <span id="c-lat">--.------</span><br>
+        LON <span id="c-lon">--.------</span><br>
+        ALT <span id="c-alt">--- m</span>
+      </div>
+
+      <!-- Speed -->
+      <div class="spd-hud">
+        <div class="spd-num" id="spd-val">0</div>
+        <div class="spd-unit">KM/H</div>
+      </div>
+
+      <!-- Panel toggle -->
+      <button id="ptoggle" onclick="togglePanel()">◁</button>
+    </div>
+
+    <!-- SIDE PANEL -->
+    <div class="panel" id="panel">
+
+      <div class="psec">
+        <div class="pt">// POSITION GPS</div>
+        <div class="drow"><span class="dlbl">PRÉCISION</span><span class="dval" id="p-acc">-- m</span></div>
+        <div class="drow"><span class="dlbl">ALTITUDE</span><span class="dval" id="p-alt">-- m</span></div>
+        <div class="drow"><span class="dlbl">VITESSE</span><span class="dval" id="p-spd">-- km/h</span></div>
+        <div class="drow"><span class="dlbl">DISTANCE</span><span class="dval" id="p-dist">0 m</span></div>
+      </div>
+
+      <div class="psec">
+        <div class="pt">// TÉLÉCHARGER CARTE</div>
+        <div class="dl-info">
+          Télécharge les tuiles autour de ta position actuelle pour utilisation hors ligne.
+        </div>
+        <button class="dl-btn" id="btn-dl-sm" onclick="downloadTiles('sm')">⬇ ZONE PROCHE (zoom 14-16)</button>
+        <button class="dl-btn" id="btn-dl-md" onclick="downloadTiles('md')">⬇ ZONE LARGE (zoom 12-16)</button>
+        <button class="dl-btn" id="btn-dl-fr" onclick="downloadTiles('city')">⬇ VILLE ENTIÈRE (zoom 10-14)</button>
+        <div id="dl-progress"></div>
+        <div id="cache-stats">Cache: 0 tuile</div>
+      </div>
+
+      <div class="psec">
+        <div class="pt">// STYLE CARTE</div>
+        <div class="style-btns">
+          <button class="sbtn2 active" id="smap-osm"  onclick="setMapStyle('osm')">OSM</button>
+          <button class="sbtn2" id="smap-topo" onclick="setMapStyle('topo')">TOPO</button>
+          <button class="sbtn2" id="smap-sat"  onclick="setMapStyle('sat')">SATELLITE</button>
+        </div>
+      </div>
+
+      <div class="psec">
+        <div class="pt">// OPTIONS</div>
+        <button class="abtn" onclick="centerMap()">⊕ RECENTRER</button>
+        <button class="abtn" onclick="addWaypoint()">+ WAYPOINT ICI</button>
+        <button class="abtn danger" onclick="clearTrail()">✕ EFFACER TRACE</button>
+        <div style="margin-top:6px;">
+          <label style="font-size:.55rem;display:flex;align-items:center;gap:6px;cursor:pointer;opacity:.8;">
+            <input type="checkbox" id="chk-follow" checked onchange="toggleFollow(this.checked)">
+            Suivre ma position
+          </label>
+          <label style="font-size:.55rem;display:flex;align-items:center;gap:6px;cursor:pointer;opacity:.8;margin-top:4px;">
+            <input type="checkbox" id="chk-north" onchange="toggleNorth(this.checked)">
+            Orienter vers le nord
+          </label>
+        </div>
+      </div>
+
+      <div class="psec">
+        <div class="pt">// WAYPOINTS</div>
+        <div id="wp-list"><div class="no-wp">Aucun waypoint</div></div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- START SCREEN -->
+<div id="start">
+  <div class="slogo">TAC<br><span style="font-size:.4em;opacity:.5;letter-spacing:.6em">MAP HUD</span></div>
+  <div class="ssub">// NAVIGATION TACTIQUE HORS LIGNE //</div>
+  <div class="sfeats">
+    ✦ Carte OpenStreetMap interactive<br>
+    <em>✦ GPS temps réel — position + trace</em><br>
+    ✦ Téléchargement tuiles hors ligne<br>
+    <em>✦ Boussole + cap + vitesse + altitude</em><br>
+    ✦ Waypoints, zoom, styles de carte
+  </div>
+  <button class="start-btn" onclick="boot()">▶ ACTIVER</button>
+  <div class="start-note">
+    Nécessite l'autorisation de localisation.<br>
+    Connexion internet requise pour le premier chargement des tuiles.
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════
+//  STATE
+// ══════════════════════════════════════════
+let map, tileLayer, playerMarker, accuracyCircle, trailLine;
+let heading = 0;
+let lat = null, lon = null, alt = null, spd = null, gpsAcc = null;
+let trail = [];
+let waypoints = [], wpCount = 0;
+let totalDist = 0;
+let followPlayer = true;
+let panelOpen = true;
+let tapeBuilt = false;
+let cachedTiles = new Map(); // url → blob URL
+let cacheCount = 0;
+let startTime = null;
+
+// Map tile sources
+const TILE_SOURCES = {
+  osm:  'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+  topo: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+  sat:  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+};
+let currentStyle = 'osm';
+
+// ══════════════════════════════════════════
+//  BOOT
+// ══════════════════════════════════════════
+function boot() {
+  document.getElementById('start').style.display = 'none';
+  startTime = performance.now();
+
+  initMap();
+  buildTape();
+  startGPS();
+  startCompass();
+  startClock();
+
+  // Monitor online/offline
+  window.addEventListener('offline', ()=>{
+    document.getElementById('offline-badge').style.display='block';
+  });
+  window.addEventListener('online', ()=>{
+    document.getElementById('offline-badge').style.display='none';
+  });
+  if (!navigator.onLine) document.getElementById('offline-badge').style.display='block';
+}
+
+// ══════════════════════════════════════════
+//  MAP INIT
+// ══════════════════════════════════════════
+function initMap() {
+  // Init Leaflet centred on France by default
+  map = L.map('map', {
+    center: [46.8, 2.5],
+    zoom: 6,
+    zoomControl: true,
+    attributionControl: false,
+  });
+
+  // Custom tile layer with offline cache
+  tileLayer = createCachedTileLayer(TILE_SOURCES.osm);
+  tileLayer.addTo(map);
+
+  // Trail polyline
+  trailLine = L.polyline([], {
+    color:'#00ff41', weight:3, opacity:0.75,
+    dashArray: null,
+  }).addTo(map);
+
+  // Player marker (custom green dot)
+  const icon = L.divIcon({
+    className: '',
+    html: `<div style="
+      width:16px;height:16px;
+      background:#00ff41;
+      border:2px solid #fff;
+      border-radius:50%;
+      box-shadow:0 0 10px #00ff41, 0 0 20px #00ff41;
+      position:relative;
+    ">
+      <div id="dir-arrow" style="
+        position:absolute;
+        top:-14px;left:50%;transform:translateX(-50%);
+        width:0;height:0;
+        border-left:5px solid transparent;
+        border-right:5px solid transparent;
+        border-bottom:12px solid #ffee00;
+        filter:drop-shadow(0 0 4px #ffee00);
+      "></div>
+    </div>`,
+    iconSize:[16,16], iconAnchor:[8,8],
+  });
+  playerMarker = L.marker([46.8,2.5], {icon, zIndexOffset:1000}).addTo(map);
+
+  // Accuracy circle
+  accuracyCircle = L.circle([46.8,2.5], {
+    radius:50, color:'rgba(0,212,255,0.5)',
+    fillColor:'rgba(0,212,255,0.05)', fillOpacity:1, weight:1,
+  }).addTo(map);
+
+  // Stop following when user drags
+  map.on('dragstart', ()=>{
+    followPlayer = false;
+    document.getElementById('chk-follow').checked = false;
+  });
+
+  // Update cache count on tile load
+  map.on('tileload', ()=> updateCacheUI());
+}
+
+// ── Custom tile layer with localStorage cache ──
+function createCachedTileLayer(url) {
+  return L.TileLayer.extend({
+    createTile(coords, done) {
+      const tile = document.createElement('img');
+      tile.alt = '';
+      const tileUrl = this.getTileUrl(coords);
+      const cacheKey = 'tile_'+tileUrl.replace(/[^a-z0-9]/gi,'_').slice(-80);
+
+      // Try localStorage first
+      const cached = safeGetStorage(cacheKey);
+      if (cached) {
+        tile.src = cached;
+        setTimeout(()=>done(null,tile),0);
+      } else {
+        // Fetch and cache
+        fetch(tileUrl, {mode:'cors'})
+          .then(r=>r.blob())
+          .then(blob=>{
+            const reader = new FileReader();
+            reader.onload = ()=>{
+              const dataUrl = reader.result;
+              safePutStorage(cacheKey, dataUrl);
+              tile.src = dataUrl;
+              cacheCount++;
+              updateCacheUI();
+              done(null,tile);
+            };
+            reader.readAsDataURL(blob);
+          })
+          .catch(()=>{
+            // Offline fallback: try cache again
+            tile.src = safeGetStorage(cacheKey) || '';
+            done(null,tile);
+          });
+      }
+      return tile;
+    }
+  })(url, {
+    maxZoom:19, subdomains:'abc',
+    crossOrigin:true,
+  });
+}
+
+function safeGetStorage(key) {
+  try { return localStorage.getItem(key); }
+  catch(e){ return null; }
+}
+function safePutStorage(key, val) {
+  try { localStorage.setItem(key, val); }
+  catch(e){
+    // Storage full — clear oldest 20%
+    try {
+      const keys=Object.keys(localStorage).filter(k=>k.startsWith('tile_'));
+      keys.slice(0, Math.ceil(keys.length*0.2)).forEach(k=>localStorage.removeItem(k));
+      localStorage.setItem(key, val);
+    } catch(e2){}
+  }
+}
+
+function updateCacheUI() {
+  let count = 0;
+  try {
+    count = Object.keys(localStorage).filter(k=>k.startsWith('tile_')).length;
+  } catch(e){}
+  cacheCount = count;
+  document.getElementById('h-cache').textContent = count > 999 ? Math.round(count/1000)+'k' : count;
+  document.getElementById('cache-stats').textContent = `Cache: ${count} tuile${count>1?'s':''} (localStorage)`;
+}
+
+// ══════════════════════════════════════════
+//  DOWNLOAD TILES FOR OFFLINE
+// ══════════════════════════════════════════
+async function downloadTiles(size) {
+  if (!lat || !lon) {
+    document.getElementById('dl-progress').textContent = '⚠ Attente GPS...'; return;
+  }
+  if (!navigator.onLine) {
+    document.getElementById('dl-progress').textContent = '⚠ Hors ligne, impossible de télécharger.'; return;
+  }
+
+  // Zoom ranges
+  const ranges = {
+    sm:   {minZ:14, maxZ:16, radius:0.02},
+    md:   {minZ:12, maxZ:16, radius:0.08},
+    city: {minZ:10, maxZ:14, radius:0.25},
+  };
+  const cfg = ranges[size];
+
+  // Collect all tile coords in the bounding box for each zoom
+  const allTiles = [];
+  for (let z=cfg.minZ; z<=cfg.maxZ; z++) {
+    const bounds = {
+      minLat: lat - cfg.radius,
+      maxLat: lat + cfg.radius,
+      minLon: lon - cfg.radius,
+      maxLon: lon + cfg.radius,
+    };
+    const minTile = latLonToTile(bounds.minLat, bounds.minLon, z);
+    const maxTile = latLonToTile(bounds.maxLat, bounds.maxLon, z);
+    const xMin = Math.min(minTile.x, maxTile.x);
+    const xMax = Math.max(minTile.x, maxTile.x);
+    const yMin = Math.min(minTile.y, maxTile.y);
+    const yMax = Math.max(minTile.y, maxTile.y);
+    for (let x=xMin; x<=xMax; x++) {
+      for (let y=yMin; y<=yMax; y++) {
+        allTiles.push({x, y, z});
+      }
+    }
+  }
+
+  const total = allTiles.length;
+  const dlProgress = document.getElementById('dl-progress');
+  const bar = document.getElementById('cache-bar');
+  const barWrap = document.getElementById('cache-bar-wrap');
+
+  // Disable buttons
+  ['btn-dl-sm','btn-dl-md','btn-dl-fr'].forEach(id=>{
+    const b=document.getElementById(id);
+    b.disabled=true; b.classList.add('active');
+  });
+
+  barWrap.style.display='block';
+  dlProgress.textContent = `Téléchargement de ${total} tuiles...`;
+
+  let done2=0, errors=0;
+  const BATCH = 6; // concurrent downloads
+
+  for (let i=0; i<allTiles.length; i+=BATCH) {
+    const batch = allTiles.slice(i, i+BATCH);
+    await Promise.all(batch.map(async ({x,y,z})=>{
+      const sub = ['a','b','c'][Math.abs(x+y)%3];
+      const url = TILE_SOURCES[currentStyle]
+        .replace('{s}',sub).replace('{z}',z).replace('{x}',x).replace('{y}',y);
+      const cacheKey = 'tile_'+url.replace(/[^a-z0-9]/gi,'_').slice(-80);
+      if (safeGetStorage(cacheKey)) { done2++; return; } // already cached
+      try {
+        const r = await fetch(url, {mode:'cors'});
+        const blob = await r.blob();
+        await new Promise(resolve=>{
+          const reader = new FileReader();
+          reader.onload=()=>{ safePutStorage(cacheKey, reader.result); resolve(); };
+          reader.readAsDataURL(blob);
+        });
+        done2++;
+      } catch(e) { errors++; done2++; }
+    }));
+
+    const pct = Math.round((done2/total)*100);
+    bar.style.width = pct+'%';
+    dlProgress.textContent = `${done2}/${total} tuiles (${pct}%) — ${errors} erreurs`;
+    updateCacheUI();
+    await new Promise(r=>setTimeout(r,10));
+  }
+
+  barWrap.style.display='none';
+  dlProgress.textContent = `✓ ${done2-errors} tuiles mises en cache. ${errors>0?errors+' échouées.':''}`;
+  ['btn-dl-sm','btn-dl-md','btn-dl-fr'].forEach(id=>{
+    const b=document.getElementById(id);
+    b.disabled=false; b.classList.remove('active');
+  });
+}
+
+// Lat/lon → OSM tile coordinates
+function latLonToTile(lat2, lon2, z) {
+  const n = Math.pow(2,z);
+  const x = Math.floor((lon2+180)/360*n);
+  const latRad = lat2*Math.PI/180;
+  const y = Math.floor((1-Math.log(Math.tan(latRad)+1/Math.cos(latRad))/Math.PI)/2*n);
+  return {x,y};
+}
+
+// ══════════════════════════════════════════
+//  GPS
+// ══════════════════════════════════════════
+function startGPS() {
+  if (!navigator.geolocation) {
+    setGPS('INDISPO','bad'); return;
+  }
+  setGPS('RECHR','warn');
+
+  navigator.geolocation.watchPosition(pos=>{
+    const newLat = pos.coords.latitude;
+    const newLon = pos.coords.longitude;
+
+    // Distance
+    if (lat!==null) {
+      const d = haversine(lat,lon,newLat,newLon);
+      if (d>0.5 && d<500) totalDist += d;
+    }
+
+    lat=newLat; lon=newLon;
+    alt=pos.coords.altitude;
+    spd=pos.coords.speed;
+    gpsAcc=pos.coords.accuracy;
+    if (pos.coords.heading!==null && !isNaN(pos.coords.heading) && spd>0.5) {
+      heading = pos.coords.heading;
+    }
+
+    const acc = Math.round(gpsAcc||0);
+    setGPS('ACTIF','ok');
+    document.getElementById('h-acc').textContent = acc+'m';
+    document.getElementById('h-acc').className = 'hs-v '+(acc<15?'ok':acc<40?'warn':'bad');
+
+    // Add trail point
+    if (trail.length===0 || haversine(lat,lon,...trail[trail.length-1])>1) {
+      trail.push([lat,lon]);
+      if (trail.length>3000) trail.shift();
+      trailLine.setLatLngs(trail);
+    }
+
+    // Update marker
+    const latlng = L.latLng(lat,lon);
+    playerMarker.setLatLng(latlng);
+    accuracyCircle.setLatLng(latlng);
+    accuracyCircle.setRadius(gpsAcc||10);
+
+    // Follow
+    if (followPlayer) map.setView(latlng, Math.max(map.getZoom(), 15));
+
+    updateUI();
+  }, err=>{
+    setGPS('ERR','bad');
+  }, {enableHighAccuracy:true, maximumAge:500, timeout:15000});
+}
+
+function setGPS(txt,cls) {
+  const el=document.getElementById('h-gps');
+  el.textContent=txt;
+  el.className='hs-v '+cls;
+}
+
+// ══════════════════════════════════════════
+//  COMPASS (device orientation)
+// ══════════════════════════════════════════
+function startCompass() {
+  const handler = e=>{
+    if (e.webkitCompassHeading!==undefined && e.webkitCompassHeading!==null) {
+      heading = e.webkitCompassHeading;
+    } else if (e.alpha!==null && e.alpha!==undefined) {
+      heading = (360-e.alpha)%360;
+    }
+    document.getElementById('h-hdg').textContent = Math.round(heading)+'°';
+    updateTape();
+
+    // Rotate map if north-up is off
+    if (document.getElementById('chk-north').checked) {
+      map.setBearing && map.setBearing(0);
+    }
+  };
+
+  if (typeof DeviceOrientationEvent!=='undefined') {
+    if (typeof DeviceOrientationEvent.requestPermission==='function') {
+      DeviceOrientationEvent.requestPermission()
+        .then(s=>{ if(s==='granted') window.addEventListener('deviceorientation',handler,true); })
+        .catch(()=>{});
+    } else {
+      window.addEventListener('deviceorientation',handler,true);
+    }
+  }
+
+  // Fallback: animate tape even without compass
+  setInterval(()=>updateTape(), 200);
+}
+
+// ══════════════════════════════════════════
+//  HEADING TAPE
+// ══════════════════════════════════════════
+function buildTape() {
+  const ti = document.getElementById('tape-inner');
+  let html='';
+  const CARDS = {0:'N',90:'E',180:'S',270:'W',45:'NE',135:'SE',225:'SO',315:'NO'};
+  for (let rep=-1;rep<=1;rep++) {
+    for (let d=0;d<360;d+=2) {
+      const isMaj=d%90===0, isMed=d%45===0&&!isMaj, isLbl=d%10===0;
+      const cls=isMaj?'maj':isMed?'med':'min';
+      const lbl=CARDS[d]||(isLbl?String(d).padStart(3,'0'):'');
+      const lblCls=CARDS[d]?'card':'';
+      html+=`<div class="htick"><div class="htick-line ${cls}"></div><div class="htick-lbl ${lblCls}">${lbl}</div></div>`;
+    }
+  }
+  ti.innerHTML=html;
+  tapeBuilt=true;
+}
+
+function updateTape() {
+  if (!tapeBuilt) return;
+  const wrap = document.querySelector('.hdg-tape');
+  if (!wrap) return;
+  const ti = document.getElementById('tape-inner');
+  const tw = wrap.clientWidth;
+  const tickW=18;
+  const total=3*360/2;
+  const center=Math.floor(total/2)*tickW;
+  const offset=(heading/2)*tickW;
+  ti.style.transform=`translateX(${tw/2-center-offset+tickW/2}px)`;
+  document.getElementById('tape-val').textContent=String(Math.round(heading)%360).padStart(3,'0')+'°';
+}
+
+// ══════════════════════════════════════════
+//  MAP CONTROLS
+// ══════════════════════════════════════════
+function setMapStyle(style) {
+  currentStyle = style;
+  ['osm','topo','sat'].forEach(s=>{
+    document.getElementById('smap-'+s).classList.toggle('active',s===style);
+  });
+  map.removeLayer(tileLayer);
+  tileLayer = createCachedTileLayer(TILE_SOURCES[style]);
+  tileLayer.addTo(map);
+}
+
+function centerMap() {
+  if (lat!==null) {
+    map.setView([lat,lon], Math.max(map.getZoom(),15));
+    followPlayer=true;
+    document.getElementById('chk-follow').checked=true;
+  }
+}
+
+function toggleFollow(v) { followPlayer=v; }
+function toggleNorth(v) { /* leaflet doesn't rotate natively without plugin — just visual flag */ }
+
+function clearTrail() {
+  trail = lat!==null ? [[lat,lon]] : [];
+  trailLine.setLatLngs(trail);
+  totalDist=0;
+}
+
+// ══════════════════════════════════════════
+//  WAYPOINTS
+// ══════════════════════════════════════════
+function addWaypoint() {
+  if (!lat) return;
+  wpCount++;
+  const label = 'WP-'+String(wpCount).padStart(2,'0');
+  const marker = L.marker([lat,lon], {
+    icon: L.divIcon({
+      className:'',
+      html:`<div style="
+        width:12px;height:12px;
+        background:#00d4ff;
+        border:2px solid #fff;
+        transform:rotate(45deg);
+        box-shadow:0 0 8px #00d4ff;
+        margin:-6px;
+      "></div>
+      <div style="position:absolute;top:-16px;left:50%;transform:translateX(-50%);
+        font:7px 'Share Tech Mono',monospace;color:#00d4ff;white-space:nowrap;
+        text-shadow:0 0 4px #00d4ff;">${label}</div>`,
+      iconSize:[12,12], iconAnchor:[6,6],
+    })
+  }).addTo(map);
+
+  waypoints.push({id:wpCount,label,lat,lon,marker});
+  renderWPList();
+}
+
+function removeWP(id) {
+  const wp = waypoints.find(w=>w.id===id);
+  if (wp) { map.removeLayer(wp.marker); }
+  waypoints = waypoints.filter(w=>w.id!==id);
+  renderWPList();
+}
+
+function renderWPList() {
+  const el=document.getElementById('wp-list');
+  if (!waypoints.length){el.innerHTML='<div class="no-wp">Aucun waypoint</div>';return;}
+  el.innerHTML=waypoints.map(w=>{
+    const d=lat?haversine(lat,lon,w.lat,w.lon):null;
+    return `<div class="wp-item">
+      <div>
+        <div style="color:var(--b);font-size:.55rem;">${w.label}</div>
+        ${d?`<div style="font-size:.48rem;opacity:.5;">${fmtDist(d)}</div>`:''}
+      </div>
+      <span class="wp-del" onclick="removeWP(${w.id})">✕</span>
+    </div>`;
+  }).join('');
+}
+
+// ══════════════════════════════════════════
+//  UI UPDATE
+// ══════════════════════════════════════════
+function updateUI() {
+  if (lat!==null) {
+    document.getElementById('c-lat').textContent = lat.toFixed(6);
+    document.getElementById('c-lon').textContent = lon.toFixed(6);
+    document.getElementById('c-alt').textContent = (alt?Math.round(alt):'--')+' m';
+    document.getElementById('p-acc').textContent = (gpsAcc?Math.round(gpsAcc):'--')+' m';
+    document.getElementById('p-alt').textContent = (alt?Math.round(alt):'--')+' m';
+  }
+  if (spd!==null) {
+    const kmh = spd*3.6;
+    document.getElementById('spd-val').textContent = Math.round(kmh);
+    document.getElementById('p-spd').textContent = kmh.toFixed(1)+' km/h';
+  }
+  document.getElementById('p-dist').textContent = fmtDist(totalDist);
+  renderWPList();
+  updateCacheUI();
+}
+
+// ══════════════════════════════════════════
+//  CLOCK
+// ══════════════════════════════════════════
+function startClock() {
+  setInterval(updateTape, 100);
+}
+
+// ══════════════════════════════════════════
+//  PANEL
+// ══════════════════════════════════════════
+function togglePanel() {
+  panelOpen=!panelOpen;
+  document.getElementById('panel').classList.toggle('closed',!panelOpen);
+  document.getElementById('ptoggle').textContent=panelOpen?'▷':'◁';
+  setTimeout(()=>map.invalidateSize(),300);
+}
+
+// ══════════════════════════════════════════
+//  HELPERS
+// ══════════════════════════════════════════
+function haversine(lat1,lon1,lat2,lon2) {
+  const R=6371000, dLat=(lat2-lat1)*Math.PI/180, dLon=(lon2-lon1)*Math.PI/180;
+  const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+function fmtDist(m) {
+  if (m>=1000) return (m/1000).toFixed(2)+' km';
+  return Math.round(m)+' m';
+}
+</script>
+</body>
+</html>
