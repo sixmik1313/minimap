@@ -1,0 +1,887 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>MINIMAP // TACTICAL</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
+
+:root {
+  --g:   #00ff41;
+  --g2:  rgba(0,255,65,0.15);
+  --r:   #ff003c;
+  --b:   #00d4ff;
+  --o:   #ffaa00;
+  --y:   #ffee00;
+  --bg:  #010a02;
+  --pan: rgba(1,12,3,0.97);
+  --brd: rgba(0,255,65,0.18);
+  --trail: #00ff41;
+}
+
+*,*::before,*::after { margin:0;padding:0;box-sizing:border-box; }
+html,body {
+  width:100%;height:100%;overflow:hidden;
+  background:var(--bg);color:var(--g);
+  font-family:'Share Tech Mono',monospace;
+  -webkit-tap-highlight-color:transparent;user-select:none;
+}
+
+/* Scanlines */
+body::before {
+  content:'';position:fixed;inset:0;z-index:900;pointer-events:none;
+  background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,0.08) 3px,rgba(0,0,0,0.08) 4px);
+}
+body::after {
+  content:'';position:fixed;inset:0;z-index:899;pointer-events:none;
+  background:radial-gradient(ellipse at center,transparent 50%,rgba(0,0,0,0.65) 100%);
+}
+
+/* ══ APP ══ */
+#app { position:fixed;inset:0;display:flex;flex-direction:column; }
+
+/* ── HEADER ── */
+header {
+  height:44px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 14px;
+  background:var(--pan);border-bottom:1px solid var(--brd);z-index:20;
+}
+.logo {
+  font-family:'Orbitron',sans-serif;font-weight:900;font-size:.95rem;
+  letter-spacing:.35em;
+  text-shadow:0 0 10px var(--g),0 0 28px var(--g);
+  animation:glow 4s ease-in-out infinite;
+}
+@keyframes glow {
+  0%,100%{text-shadow:0 0 10px var(--g),0 0 28px var(--g);}
+  50%{text-shadow:0 0 18px var(--g),0 0 55px var(--g),0 0 85px var(--g);}
+}
+.hstats{display:flex;gap:16px;font-size:.6rem;}
+.hs{display:flex;flex-direction:column;align-items:center;gap:1px;}
+.hs-l{opacity:.4;font-size:.5rem;letter-spacing:.08em;}
+.hs-v{color:var(--b);font-weight:bold;}
+
+/* ── BODY ── */
+.body { flex:1;display:flex;overflow:hidden;position:relative; }
+
+/* ══ MAP CANVAS AREA ══ */
+#map-wrap {
+  flex:1;position:relative;background:#000;
+  display:flex;align-items:center;justify-content:center;
+  overflow:hidden;
+}
+#map-canvas { display:block;image-rendering:pixelated; }
+
+/* Grid overlay on map */
+#map-wrap::before {
+  content:'';position:absolute;inset:0;pointer-events:none;z-index:2;
+  background-image:
+    linear-gradient(rgba(0,255,65,0.04) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(0,255,65,0.04) 1px,transparent 1px);
+  background-size:40px 40px;
+}
+
+/* HUD overlays on map */
+.map-hud {
+  position:absolute;z-index:5;
+  font-family:'Orbitron',sans-serif;
+  pointer-events:none;
+}
+/* Corner brackets */
+.corner { position:absolute;width:22px;height:22px;z-index:5; }
+.corner.tl{top:10px;left:10px;border-top:2px solid var(--g);border-left:2px solid var(--g);}
+.corner.tr{top:10px;right:10px;border-top:2px solid var(--g);border-right:2px solid var(--g);}
+.corner.bl{bottom:10px;left:10px;border-bottom:2px solid var(--g);border-left:2px solid var(--g);}
+.corner.br{bottom:10px;right:10px;border-bottom:2px solid var(--g);border-right:2px solid var(--g);}
+
+/* Mini compass (top-right of map) */
+#mini-compass {
+  position:absolute;top:16px;right:16px;z-index:6;
+  width:56px;height:56px;
+}
+#mini-compass canvas { display:block; }
+
+/* Coord overlay bottom-left */
+.coord-hud {
+  position:absolute;bottom:14px;left:14px;z-index:6;
+  font-size:.52rem;line-height:1.7;opacity:.8;
+  letter-spacing:.06em;
+}
+.coord-hud span { color:var(--b); }
+
+/* Speed hud bottom-right */
+.speed-hud {
+  position:absolute;bottom:14px;right:14px;z-index:6;
+  text-align:right;
+}
+.spd-big{font-family:'Orbitron',sans-serif;font-weight:900;font-size:1.8rem;
+  color:var(--g);text-shadow:0 0 14px var(--g);line-height:1;}
+.spd-unit{font-size:.5rem;opacity:.5;letter-spacing:.12em;}
+.spd-label{font-size:.45rem;opacity:.35;letter-spacing:.15em;}
+
+/* Scale bar */
+.scale-bar {
+  position:absolute;bottom:46px;right:14px;z-index:6;
+  display:flex;flex-direction:column;align-items:flex-end;gap:2px;
+}
+.scale-line{
+  height:3px;background:var(--g);
+  border-left:2px solid var(--g);border-right:2px solid var(--g);
+  box-shadow:0 0 5px var(--g);
+}
+.scale-label{font-size:.45rem;opacity:.5;letter-spacing:.08em;}
+
+/* Heading tape (top of map, full width) */
+.hdg-tape-wrap {
+  position:absolute;top:0;left:0;right:0;height:26px;z-index:6;
+  background:rgba(0,5,1,0.8);border-bottom:1px solid var(--brd);
+  overflow:hidden;
+}
+.hdg-tape-inner {
+  position:absolute;top:0;height:100%;
+  display:flex;align-items:flex-end;padding-bottom:2px;
+  white-space:nowrap;
+}
+.hdg-tick { width:20px;flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:1px; }
+.hdg-tick .tl { width:1px;background:var(--g); }
+.hdg-tick .tl.maj { height:10px;background:rgba(255,238,0,.9); }
+.hdg-tick .tl.med { height:7px;background:rgba(0,255,65,.7); }
+.hdg-tick .tl.min { height:4px;background:rgba(0,255,65,.3); }
+.hdg-tick .tl-lbl { font-size:.4rem;color:var(--g);opacity:.7; }
+.hdg-tick .tl-lbl.card { color:var(--y);opacity:1; }
+.tape-cur {
+  position:absolute;top:0;left:50%;transform:translateX(-50%);
+  display:flex;flex-direction:column;align-items:center;gap:0;
+  pointer-events:none;
+}
+.tape-cur-tri {
+  width:0;height:0;
+  border-left:5px solid transparent;border-right:5px solid transparent;
+  border-top:7px solid var(--y);
+}
+.tape-cur-val {
+  font-family:'Orbitron',sans-serif;font-weight:700;font-size:.55rem;
+  color:var(--y);letter-spacing:.05em;
+  background:rgba(0,5,1,.9);padding:0 3px;
+}
+
+/* ══ SIDE PANEL ══ */
+.panel {
+  width:190px;flex-shrink:0;
+  background:var(--pan);border-left:1px solid var(--brd);
+  display:flex;flex-direction:column;overflow-y:auto;z-index:10;
+  transition:width .26s cubic-bezier(.4,0,.2,1),opacity .26s;
+}
+.panel.closed{width:0;opacity:0;pointer-events:none;}
+
+#ptoggle {
+  position:absolute;top:50%;right:0;transform:translateY(-50%);
+  width:18px;height:40px;z-index:30;
+  background:var(--pan);border:1px solid var(--brd);border-right:none;
+  color:var(--g);font-size:.6rem;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;transition:background .15s;
+}
+#ptoggle:hover{background:rgba(0,255,65,.12);}
+
+.psec{border-bottom:1px solid var(--brd);padding:9px 11px;flex-shrink:0;}
+.pt{font-family:'Orbitron',sans-serif;font-size:.46rem;
+  letter-spacing:.2em;opacity:.42;margin-bottom:6px;padding-bottom:3px;
+  border-bottom:1px solid rgba(0,255,65,.08);white-space:nowrap;}
+.drow{display:flex;justify-content:space-between;align-items:baseline;margin:3px 0;font-size:.58rem;}
+.dval{color:var(--b);font-weight:bold;}
+.dlbl{opacity:.48;font-size:.52rem;}
+
+/* Waypoint list */
+#wp-list{display:flex;flex-direction:column;gap:4px;max-height:160px;overflow-y:auto;}
+.wp-item{
+  font-size:.55rem;padding:4px 6px;
+  border-left:2px solid var(--b);background:rgba(0,212,255,.06);
+  display:flex;justify-content:space-between;align-items:center;
+  cursor:pointer;transition:background .15s;
+}
+.wp-item:hover{background:rgba(0,212,255,.12);}
+.wp-item.active{border-left-color:var(--y);background:rgba(255,238,0,.06);}
+.wp-del{opacity:.3;font-size:.6rem;cursor:pointer;padding:0 3px;}
+.wp-del:hover{opacity:1;color:var(--r);}
+.no-wp{font-size:.55rem;opacity:.3;font-style:italic;}
+
+/* Zoom controls */
+.zoom-row{display:flex;gap:6px;align-items:center;}
+.zbtn{
+  font-family:'Share Tech Mono',monospace;font-size:.75rem;
+  width:28px;height:28px;background:transparent;
+  border:1px solid var(--brd);color:var(--g);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;transition:all .15s;
+}
+.zbtn:hover{background:rgba(0,255,65,.12);border-color:var(--g);}
+.zoom-val{font-size:.6rem;color:var(--b);flex:1;text-align:center;}
+
+/* Trail mode */
+.mode-btns{display:flex;gap:5px;flex-wrap:wrap;}
+.mbtn{
+  font-size:.5rem;padding:4px 7px;background:transparent;
+  border:1px solid var(--brd);color:var(--g);cursor:pointer;
+  letter-spacing:.06em;transition:all .15s;
+  font-family:'Share Tech Mono',monospace;
+}
+.mbtn.active,.mbtn:hover{background:rgba(0,255,65,.12);border-color:var(--g);}
+
+/* Action buttons */
+.abtn {
+  font-family:'Share Tech Mono',monospace;font-size:.58rem;
+  padding:6px 10px;background:transparent;color:var(--g);
+  border:1px solid var(--brd);cursor:pointer;width:100%;
+  letter-spacing:.08em;transition:all .15s;margin-bottom:4px;
+  text-align:left;
+}
+.abtn:hover{background:rgba(0,255,65,.1);border-color:var(--g);}
+.abtn.danger{color:var(--r);border-color:rgba(255,0,60,.3);}
+.abtn.danger:hover{background:rgba(255,0,60,.1);}
+
+/* START */
+#start {
+  position:fixed;inset:0;z-index:800;
+  background:rgba(1,6,2,.97);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;
+}
+.slogo{
+  font-family:'Orbitron',sans-serif;font-weight:900;
+  font-size:clamp(1.6rem,5vw,3rem);letter-spacing:.4em;text-align:center;
+  text-shadow:0 0 18px var(--g),0 0 55px var(--g);animation:glow 2s ease-in-out infinite;
+}
+.ssub{font-size:.68rem;opacity:.4;letter-spacing:.2em;text-align:center;}
+.sfeats{font-size:.6rem;opacity:.55;text-align:center;line-height:2;
+  border:1px solid var(--brd);padding:10px 18px;max-width:310px;}
+.sfeats em{color:var(--o);font-style:normal;}
+.sbtn{
+  font-family:'Orbitron',sans-serif;font-size:.8rem;letter-spacing:.3em;
+  padding:12px 36px;background:transparent;color:var(--g);border:2px solid var(--g);cursor:pointer;
+  box-shadow:0 0 16px rgba(0,255,65,.2);transition:all .2s;
+}
+.sbtn:hover,.sbtn:active{background:var(--g);color:#000;box-shadow:0 0 45px rgba(0,255,65,.9);}
+.perms{font-size:.52rem;opacity:.32;text-align:center;max-width:280px;line-height:1.8;}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="logo">◈ MINIMAP</div>
+    <div class="hstats">
+      <div class="hs"><span class="hs-l">CAP</span><span class="hs-v" id="h-hdg">---°</span></div>
+      <div class="hs"><span class="hs-l">DIST</span><span class="hs-v" id="h-dist">0m</span></div>
+      <div class="hs"><span class="hs-l">WP</span><span class="hs-v" id="h-wp">0</span></div>
+      <div class="hs"><span class="hs-l">GPS</span><span class="hs-v" id="h-gps">--</span></div>
+    </div>
+  </header>
+
+  <div class="body">
+    <!-- MAP -->
+    <div id="map-wrap">
+      <!-- HUD overlays -->
+      <div class="corner tl"></div>
+      <div class="corner tr" style="right:10px;"></div>
+      <div class="corner bl"></div>
+      <div class="corner br" style="right:10px;"></div>
+
+      <!-- Heading tape -->
+      <div class="hdg-tape-wrap">
+        <div class="hdg-tape-inner" id="hdg-tape"></div>
+        <div class="tape-cur">
+          <div class="tape-cur-val" id="tape-val">000°</div>
+          <div class="tape-cur-tri"></div>
+        </div>
+      </div>
+
+      <canvas id="map-canvas"></canvas>
+
+      <!-- Mini compass -->
+      <div id="mini-compass">
+        <canvas id="compass-cv" width="56" height="56"></canvas>
+      </div>
+
+      <!-- Coords -->
+      <div class="coord-hud" id="coord-hud">
+        LAT: <span id="c-lat">---.------</span><br>
+        LON: <span id="c-lon">---.------</span><br>
+        ALT: <span id="c-alt">--- m</span>
+      </div>
+
+      <!-- Speed -->
+      <div class="speed-hud">
+        <div class="spd-label">VITESSE</div>
+        <div class="spd-big" id="spd-val">0.0</div>
+        <div class="spd-unit">KM/H</div>
+      </div>
+
+      <!-- Scale -->
+      <div class="scale-bar" id="scale-bar">
+        <div class="scale-line" id="scale-line" style="width:60px;"></div>
+        <div class="scale-label" id="scale-lbl">-- m</div>
+      </div>
+
+      <!-- Panel toggle -->
+      <button id="ptoggle" onclick="togglePanel()">◁</button>
+    </div>
+
+    <!-- SIDE PANEL -->
+    <div class="panel" id="panel">
+      <div class="psec">
+        <div class="pt">// POSITION</div>
+        <div class="drow"><span class="dlbl">PRÉCISION</span><span class="dval" id="p-acc">-- m</span></div>
+        <div class="drow"><span class="dlbl">ALTITUDE</span><span class="dval" id="p-alt">-- m</span></div>
+        <div class="drow"><span class="dlbl">VITESSE</span><span class="dval" id="p-spd">-- km/h</span></div>
+        <div class="drow"><span class="dlbl">DISTANCE TOT.</span><span class="dval" id="p-dist">0 m</span></div>
+        <div class="drow"><span class="dlbl">POINTS</span><span class="dval" id="p-pts">0</span></div>
+      </div>
+
+      <div class="psec">
+        <div class="pt">// ZOOM</div>
+        <div class="zoom-row">
+          <button class="zbtn" onclick="setZoom(-1)">−</button>
+          <div class="zoom-val" id="zoom-val">×1</div>
+          <button class="zbtn" onclick="setZoom(1)">+</button>
+        </div>
+      </div>
+
+      <div class="psec">
+        <div class="pt">// MODE CARTE</div>
+        <div class="mode-btns">
+          <button class="mbtn active" id="btn-north" onclick="setMapMode('north')">NORD</button>
+          <button class="mbtn" id="btn-head" onclick="setMapMode('heading')">CAP</button>
+        </div>
+        <div style="font-size:.52rem;opacity:.35;margin-top:6px;line-height:1.6;">
+          NORD: carte fixe nord<br>CAP: carte tourne avec toi
+        </div>
+      </div>
+
+      <div class="psec">
+        <div class="pt">// WAYPOINTS</div>
+        <button class="abtn" onclick="addWaypoint()">+ MARQUER POSITION</button>
+        <div id="wp-list"><div class="no-wp">Aucun waypoint</div></div>
+      </div>
+
+      <div class="psec">
+        <div class="pt">// ACTIONS</div>
+        <button class="abtn" onclick="centerOnPlayer()">⊕ RECENTRER</button>
+        <button class="abtn danger" onclick="clearTrail()">✕ EFFACER TRACE</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- START -->
+<div id="start">
+  <div class="slogo">MINI<br><span style="font-size:.4em;opacity:.5;letter-spacing:.6em">MAP HUD</span></div>
+  <div class="ssub">// TRACKING TACTIQUE TEMPS RÉEL //</div>
+  <div class="sfeats">
+    ✦ Carte qui trace ta trajectoire GPS<br>
+    <em>✦ Boussole gyroscopique en temps réel</em><br>
+    ✦ Tape de cap style cockpit militaire<br>
+    <em>✦ Mode Nord fixe ou orienté cap</em><br>
+    ✦ Waypoints, distance, altitude, vitesse
+  </div>
+  <button class="sbtn" onclick="boot()">▶ ACTIVER</button>
+  <div class="perms">Nécessite GPS et capteurs de mouvement.<br>Accepte les permissions quand demandé.</div>
+</div>
+
+<script>
+// ════════════════════════════════
+//  STATE
+// ════════════════════════════════
+let heading  = 0;       // magnetic degrees
+let roll=0, pitch=0;
+let lat=null, lon=null, alt=null, spd=null, gpsAcc=null;
+let trail    = [];      // [{lat,lon,t}]
+let waypoints= [];      // [{lat,lon,id,label}]
+let wpCounter= 0;
+let zoom     = 1;       // pixels per meter
+const ZOOM_LEVELS = [0.5,1,2,4,8,16,32];
+let zoomIdx  = 2;
+let mapMode  = 'north'; // 'north' | 'heading'
+let totalDist= 0;       // meters
+let panelOpen= true;
+let booted   = false;
+let startTime= null;
+
+// Canvas refs
+let mapCv, mapCtx, compassCv, compassCtx;
+let tapeBuilt = false;
+
+// View offset (map panning)
+let viewX = 0, viewY = 0; // offset in meters from first point
+
+// ════════════════════════════════
+//  BOOT
+// ════════════════════════════════
+async function boot() {
+  document.getElementById('start').style.display='none';
+  startTime = performance.now();
+  booted = true;
+
+  setupCanvases();
+  window.addEventListener('resize', setupCanvases);
+  window.addEventListener('orientationchange',()=>setTimeout(setupCanvases,400));
+
+  buildTape();
+  startGPS();
+  startSensors();
+  requestAnimationFrame(render);
+}
+
+function setupCanvases() {
+  const wrap = document.getElementById('map-wrap');
+  const r = wrap.getBoundingClientRect();
+  mapCv = document.getElementById('map-canvas');
+  mapCv.width  = r.width;
+  mapCv.height = r.height;
+  mapCtx = mapCv.getContext('2d');
+
+  compassCv  = document.getElementById('compass-cv');
+  compassCtx = compassCv.getContext('2d');
+}
+
+// ════════════════════════════════
+//  GPS
+// ════════════════════════════════
+function startGPS() {
+  if (!navigator.geolocation) {
+    setGPSStatus('INDISPO','var(--r)'); return;
+  }
+  setGPSStatus('RECHR','var(--o)');
+
+  navigator.geolocation.watchPosition(pos => {
+    const newLat = pos.coords.latitude;
+    const newLon = pos.coords.longitude;
+    const now = Date.now();
+
+    // Compute distance from last point
+    if (lat !== null) {
+      const d = haversine(lat, lon, newLat, newLon);
+      if (d > 1 && d < 500) { // ignore jitter < 1m, jumps > 500m
+        totalDist += d;
+        document.getElementById('p-dist').textContent = fmtDist(totalDist);
+        document.getElementById('h-dist').textContent = fmtDist(totalDist);
+      }
+    }
+
+    lat = newLat; lon = newLon;
+    alt = pos.coords.altitude;
+    spd = pos.coords.speed; // m/s
+    gpsAcc = pos.coords.accuracy;
+
+    // GPS heading fallback if no sensor
+    if (pos.coords.heading !== null && !isNaN(pos.coords.heading) && pos.coords.heading >= 0) {
+      // Only use GPS heading if moving
+      if (spd && spd > 0.5) heading = pos.coords.heading;
+    }
+
+    // Add to trail
+    if (trail.length === 0 || haversine(lat,lon,trail[trail.length-1].lat,trail[trail.length-1].lon) > 0.5) {
+      trail.push({lat, lon, t: now});
+      if (trail.length > 5000) trail.shift();
+    }
+
+    setGPSStatus('ACTIF','var(--g)');
+
+  }, err => {
+    setGPSStatus('ERR','var(--r)');
+  }, {enableHighAccuracy:true, maximumAge:500, timeout:15000});
+}
+
+function setGPSStatus(t,c){
+  const el=document.getElementById('h-gps');
+  el.textContent=t; el.style.color=c;
+}
+
+// ════════════════════════════════
+//  SENSORS
+// ════════════════════════════════
+function startSensors() {
+  const handler = e => {
+    if (e.webkitCompassHeading !== undefined && e.webkitCompassHeading !== null) {
+      heading = e.webkitCompassHeading;
+    } else if (e.alpha !== null && e.alpha !== undefined) {
+      heading = (360 - e.alpha) % 360;
+    }
+    roll  = e.gamma || 0;
+    pitch = e.beta  || 0;
+  };
+
+  if (typeof DeviceOrientationEvent !== 'undefined') {
+    if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+      DeviceOrientationEvent.requestPermission()
+        .then(s => { if (s==='granted') window.addEventListener('deviceorientation', handler, true); })
+        .catch(()=>{});
+    } else {
+      window.addEventListener('deviceorientation', handler, true);
+    }
+  }
+}
+
+// ════════════════════════════════
+//  PANEL / ZOOM / MODE
+// ════════════════════════════════
+function togglePanel() {
+  panelOpen = !panelOpen;
+  document.getElementById('panel').classList.toggle('closed',!panelOpen);
+  document.getElementById('ptoggle').textContent = panelOpen?'▷':'◁';
+  setTimeout(setupCanvases,280);
+}
+
+function setZoom(dir) {
+  zoomIdx = Math.max(0, Math.min(ZOOM_LEVELS.length-1, zoomIdx+dir));
+  zoom = ZOOM_LEVELS[zoomIdx];
+  document.getElementById('zoom-val').textContent = '×'+zoom;
+  updateScale();
+}
+
+function setMapMode(m) {
+  mapMode = m;
+  document.getElementById('btn-north').classList.toggle('active',m==='north');
+  document.getElementById('btn-head').classList.toggle('active',m==='heading');
+}
+
+function centerOnPlayer() {
+  viewX = 0; viewY = 0;
+}
+
+function clearTrail() {
+  trail = trail.slice(-1); // keep last point
+  totalDist = 0;
+  document.getElementById('p-dist').textContent = '0 m';
+}
+
+// ════════════════════════════════
+//  WAYPOINTS
+// ════════════════════════════════
+function addWaypoint() {
+  if (lat===null) return;
+  wpCounter++;
+  waypoints.push({lat, lon, id:wpCounter, label:'WP-'+String(wpCounter).padStart(2,'0')});
+  document.getElementById('h-wp').textContent = waypoints.length;
+  renderWPList();
+}
+
+function removeWaypoint(id) {
+  waypoints = waypoints.filter(w=>w.id!==id);
+  document.getElementById('h-wp').textContent = waypoints.length;
+  renderWPList();
+}
+
+function renderWPList() {
+  const el = document.getElementById('wp-list');
+  if (!waypoints.length) { el.innerHTML='<div class="no-wp">Aucun waypoint</div>'; return; }
+  el.innerHTML = waypoints.map(w=>`
+    <div class="wp-item" id="wp-${w.id}">
+      <span>${w.label}</span>
+      <span class="wp-del" onclick="removeWaypoint(${w.id})">✕</span>
+    </div>`).join('');
+}
+
+// ════════════════════════════════
+//  SCALE BAR
+// ════════════════════════════════
+function updateScale() {
+  // How many meters does 60px represent?
+  const metersPerPx = 1/zoom;
+  const meters60 = 60 * metersPerPx;
+  // Round to nice number
+  const nice = niceNumber(meters60);
+  const pxWidth = nice * zoom;
+  document.getElementById('scale-line').style.width = pxWidth+'px';
+  document.getElementById('scale-lbl').textContent = fmtDist(nice);
+}
+
+function niceNumber(n) {
+  const mag = Math.pow(10, Math.floor(Math.log10(n)));
+  const norm = n/mag;
+  if      (norm<1.5) return 1*mag;
+  else if (norm<3.5) return 2*mag;
+  else if (norm<7.5) return 5*mag;
+  else               return 10*mag;
+}
+
+// ════════════════════════════════
+//  RENDER LOOP
+// ════════════════════════════════
+function render() {
+  if (!booted || !mapCtx) { requestAnimationFrame(render); return; }
+
+  drawMap();
+  drawCompass();
+  updateTape();
+  updateUI();
+  updateScale();
+
+  requestAnimationFrame(render);
+}
+
+// ════════════════════════════════
+//  DRAW MAP
+// ════════════════════════════════
+function drawMap() {
+  const cv = mapCv, ctx = mapCtx;
+  const W = cv.width, H = cv.height;
+  const CX = W/2, CY = H/2;
+
+  ctx.clearRect(0,0,W,H);
+
+  // Background
+  ctx.fillStyle = '#010a02';
+  ctx.fillRect(0,0,W,H);
+
+  if (trail.length === 0) {
+    // No GPS yet — show waiting message
+    ctx.fillStyle = 'rgba(0,255,65,0.2)';
+    ctx.font = '13px "Share Tech Mono"';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('EN ATTENTE DU GPS...', CX, CY);
+    return;
+  }
+
+  ctx.save();
+  ctx.translate(CX, CY);
+
+  // Rotate map in heading mode
+  const mapRotation = mapMode==='heading' ? -heading*Math.PI/180 : 0;
+  ctx.rotate(mapRotation);
+
+  // Origin = last player position
+  const originLat = trail[trail.length-1].lat;
+  const originLon = trail[trail.length-1].lon;
+
+  // Helper: geo → canvas pixels (relative to player)
+  function geoToPx(lt, ln) {
+    const metersX = (ln - originLon) * 111320 * Math.cos(originLat*Math.PI/180);
+    const metersY = -(lt - originLat) * 110540;
+    return [metersX*zoom, metersY*zoom];
+  }
+
+  // ── Background grid (larger) ──
+  const gridSpaceM = niceNumber(100/zoom);
+  const gridSpacePx = gridSpaceM * zoom;
+  ctx.strokeStyle = 'rgba(0,255,65,0.06)';
+  ctx.lineWidth = 1;
+  for (let gx=-W;gx<W;gx+=gridSpacePx) {
+    ctx.beginPath(); ctx.moveTo(gx,-H); ctx.lineTo(gx,H); ctx.stroke();
+  }
+  for (let gy=-H;gy<H;gy+=gridSpacePx) {
+    ctx.beginPath(); ctx.moveTo(-W,gy); ctx.lineTo(W,gy); ctx.stroke();
+  }
+
+  // ── Trail ──
+  if (trail.length > 1) {
+    // Color gradient: old=dim, recent=bright
+    for (let i=1; i<trail.length; i++) {
+      const t = i/trail.length;
+      const [x0,y0] = geoToPx(trail[i-1].lat, trail[i-1].lon);
+      const [x1,y1] = geoToPx(trail[i].lat, trail[i].lon);
+      ctx.beginPath();
+      ctx.moveTo(x0,y0); ctx.lineTo(x1,y1);
+      ctx.strokeStyle = `rgba(0,255,65,${0.15 + t*0.7})`;
+      ctx.lineWidth = 1.5 + t*1.5;
+      ctx.shadowColor = t>0.9 ? 'rgba(0,255,65,0.6)' : 'transparent';
+      ctx.shadowBlur  = t>0.9 ? 6 : 0;
+      ctx.stroke();
+    }
+    ctx.shadowBlur = 0;
+
+    // Trail dots every N points
+    ctx.fillStyle = 'rgba(0,255,65,0.25)';
+    for (let i=0; i<trail.length-1; i+=Math.max(1,Math.floor(trail.length/40))) {
+      const [px,py] = geoToPx(trail[i].lat, trail[i].lon);
+      ctx.beginPath(); ctx.arc(px,py,1.5,0,Math.PI*2); ctx.fill();
+    }
+  }
+
+  // ── Waypoints ──
+  waypoints.forEach((wp,idx) => {
+    const [px,py] = geoToPx(wp.lat, wp.lon);
+    // Diamond shape
+    ctx.save(); ctx.translate(px,py);
+    ctx.rotate(mapRotation===0?0:-mapRotation); // keep label readable
+    ctx.strokeStyle = '#00d4ff';
+    ctx.fillStyle   = 'rgba(0,212,255,0.15)';
+    ctx.lineWidth   = 1.5;
+    ctx.shadowColor = '#00d4ff'; ctx.shadowBlur=8;
+    ctx.beginPath();
+    ctx.moveTo(0,-8); ctx.lineTo(6,0); ctx.lineTo(0,8); ctx.lineTo(-6,0); ctx.closePath();
+    ctx.fill(); ctx.stroke(); ctx.shadowBlur=0;
+    // Label
+    ctx.font = '8px "Share Tech Mono"';
+    ctx.fillStyle = '#00d4ff'; ctx.textAlign='center';
+    ctx.fillText(wp.label, 0, -14);
+    // Distance to wp
+    const d = haversine(lat||originLat, lon||originLon, wp.lat, wp.lon);
+    ctx.fillStyle='rgba(0,212,255,0.6)';
+    ctx.fillText(fmtDist(d), 0, -5);
+    ctx.restore();
+  });
+
+  // ── Player marker (always at centre) ──
+  const PSIZE = 10;
+  // Heading indicator (direction cone)
+  const playerAngle = mapMode==='heading' ? 0 : heading*Math.PI/180;
+  ctx.save(); ctx.rotate(playerAngle - (mapMode==='heading'?0:0));
+
+  // Cone of vision
+  ctx.beginPath();
+  ctx.moveTo(0,0);
+  ctx.arc(0,0,PSIZE*3,-Math.PI/4,Math.PI/4);
+  ctx.closePath();
+  ctx.fillStyle='rgba(255,238,0,0.08)';
+  ctx.fill();
+  ctx.restore();
+
+  // Pulsing outer ring
+  const pulse = (Math.sin(performance.now()/400)+1)/2;
+  ctx.beginPath(); ctx.arc(0,0,PSIZE*1.8+pulse*4,0,Math.PI*2);
+  ctx.strokeStyle=`rgba(0,255,65,${0.15+pulse*0.2})`;
+  ctx.lineWidth=1; ctx.stroke();
+
+  // Main player dot
+  ctx.beginPath(); ctx.arc(0,0,PSIZE/2,0,Math.PI*2);
+  ctx.fillStyle='#00ff41'; ctx.shadowColor='#00ff41'; ctx.shadowBlur=14; ctx.fill(); ctx.shadowBlur=0;
+
+  // Direction arrow
+  ctx.save();
+  const arrAng = mapMode==='heading' ? -Math.PI/2 : (heading-90)*Math.PI/180;
+  ctx.rotate(arrAng);
+  ctx.fillStyle='#ffee00'; ctx.shadowColor='#ffee00'; ctx.shadowBlur=8;
+  ctx.beginPath();
+  ctx.moveTo(PSIZE*1.8, 0);
+  ctx.lineTo(PSIZE*0.8, -4);
+  ctx.lineTo(PSIZE*0.8,  4);
+  ctx.closePath(); ctx.fill(); ctx.shadowBlur=0;
+  ctx.restore();
+
+  ctx.restore(); // end map transform
+
+  // ── Accuracy circle (no rotation, world space) ──
+  if (gpsAcc) {
+    const accPx = gpsAcc * zoom;
+    ctx.beginPath(); ctx.arc(CX,CY,accPx,0,Math.PI*2);
+    ctx.strokeStyle='rgba(0,212,255,0.15)'; ctx.lineWidth=1; ctx.setLineDash([4,4]);
+    ctx.stroke(); ctx.setLineDash([]);
+  }
+}
+
+// ════════════════════════════════
+//  MINI COMPASS
+// ════════════════════════════════
+function drawCompass() {
+  const cv = compassCv, ctx = compassCtx;
+  const W=cv.width, H=cv.height, CX=W/2, CY=H/2, R=W/2-2;
+  ctx.clearRect(0,0,W,H);
+
+  // bg circle
+  ctx.beginPath(); ctx.arc(CX,CY,R,0,Math.PI*2);
+  ctx.fillStyle='rgba(1,10,3,0.85)';
+  ctx.strokeStyle='rgba(0,255,65,0.45)'; ctx.lineWidth=1.5;
+  ctx.fill(); ctx.stroke();
+
+  ctx.save(); ctx.translate(CX,CY); ctx.rotate(-heading*Math.PI/180);
+
+  // Cardinal marks
+  const cards=[['N',0,'#ffee00'],['E',90,'#00ff41'],['S',180,'#00ff41'],['W',270,'#00ff41']];
+  ctx.font='bold 8px "Orbitron"'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  cards.forEach(([l,d,c])=>{
+    const r2=d*Math.PI/180;
+    ctx.fillStyle=c;
+    ctx.fillText(l, Math.sin(r2)*(R-8), -Math.cos(r2)*(R-8));
+  });
+  // N indicator line
+  ctx.strokeStyle='#ffee00'; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.moveTo(0,-R+2); ctx.lineTo(0,-(R-12)); ctx.stroke();
+
+  ctx.restore();
+
+  // Fixed heading line
+  ctx.strokeStyle='rgba(255,238,0,0.8)'; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.moveTo(CX,CY-R+2); ctx.lineTo(CX,CY-R+10); ctx.stroke();
+
+  // Centre
+  ctx.beginPath(); ctx.arc(CX,CY,2.5,0,Math.PI*2);
+  ctx.fillStyle='#00ff41'; ctx.fill();
+}
+
+// ════════════════════════════════
+//  HEADING TAPE
+// ════════════════════════════════
+function buildTape() {
+  const ti = document.getElementById('hdg-tape');
+  let html='';
+  for (let rep=-1;rep<=1;rep++) {
+    for (let d=0;d<360;d+=2) {
+      const deg = d+rep*360;
+      const isMajor=d%90===0, isMed=d%45===0&&!isMajor, isLabeled=d%10===0;
+      const tClass=isMajor?'maj':isMed?'med':'min';
+      const lbl=isMajor?['N','E','S','W'][d/90]:(isLabeled?String(d).padStart(3,'0'):'');
+      const lblClass=isMajor?'card':'';
+      html+=`<div class="hdg-tick"><div class="tl ${tClass}"></div><div class="tl-lbl ${lblClass}">${lbl}</div></div>`;
+    }
+  }
+  ti.innerHTML=html;
+  tapeBuilt=true;
+}
+
+function updateTape() {
+  if (!tapeBuilt) return;
+  const tape=document.getElementById('hdg-tape-wrap');
+  const ti=document.getElementById('hdg-tape');
+  const tw=tape.clientWidth;
+  const tickW=20; // px per 2 degrees
+  const total=3*360/2;
+  const center=Math.floor(total/2)*tickW;
+  const offset=(heading/2)*tickW;
+  ti.style.transform=`translateX(${tw/2-center-offset+tickW/2}px)`;
+  const hdgRound=Math.round(heading)%360;
+  document.getElementById('tape-val').textContent=String(hdgRound).padStart(3,'0')+'°';
+}
+
+// ════════════════════════════════
+//  UPDATE UI PANELS
+// ════════════════════════════════
+function updateUI() {
+  const hdgR=Math.round(heading)%360;
+  document.getElementById('h-hdg').textContent=String(hdgR).padStart(3,'0')+'°';
+
+  if (lat!==null) {
+    document.getElementById('c-lat').textContent=lat.toFixed(6);
+    document.getElementById('c-lon').textContent=lon.toFixed(6);
+    document.getElementById('c-alt').textContent=(alt?Math.round(alt):'--')+' m';
+    document.getElementById('p-alt').textContent=(alt?Math.round(alt):'--')+' m';
+    document.getElementById('p-acc').textContent=(gpsAcc?Math.round(gpsAcc):'--')+' m';
+  }
+  if (spd!==null) {
+    const kmh=(spd*3.6);
+    document.getElementById('spd-val').textContent=kmh.toFixed(1);
+    document.getElementById('p-spd').textContent=kmh.toFixed(1)+' km/h';
+  }
+  document.getElementById('p-pts').textContent=trail.length;
+}
+
+// ════════════════════════════════
+//  HELPERS
+// ════════════════════════════════
+function haversine(lat1,lon1,lat2,lon2) {
+  const R=6371000, dLat=(lat2-lat1)*Math.PI/180, dLon=(lon2-lon1)*Math.PI/180;
+  const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+function fmtDist(m) {
+  if (m>=1000) return (m/1000).toFixed(2)+' km';
+  return Math.round(m)+' m';
+}
+
+function headingToCard(h) {
+  return ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'][Math.round(h/22.5)%16];
+}
+</script>
+</body>
+</html>
